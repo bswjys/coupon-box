@@ -314,9 +314,9 @@ async def run():
         check("manifest 테마 #F2F4F6", manifest.get("theme_color") == "#F2F4F6", str(manifest.get("theme_color")))
         check("manifest 시작 주소", manifest.get("start_url") == "./")
         sw = await page0.evaluate("fetch('./sw.js').then(r => r.text())")
-        check("sw 캐시 이름 coupon-box-v1", "coupon-box-v1" in sw)
+        check("sw 캐시 이름 coupon-box-v2", "coupon-box-v2" in sw)
         html = await page0.evaluate("fetch('./index.html').then(r => r.text())")
-        check("index 버전 쿼리", "styles.css?v=1" in html and "app.js?v=1" in html)
+        check("index 버전 쿼리", "styles.css?v=2" in html and "app.js?v=2" in html)
         for asset in ["icon.svg", "icon-180.png", "icon-192.png", "icon-512.png",
                       "icon-maskable-512.png", "manifest.webmanifest", "app.js", "styles.css"]:
             ok = await page0.evaluate(f"fetch('./{asset}').then(r => r.ok)")
