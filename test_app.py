@@ -6,6 +6,7 @@
 검증 항목
   · PWA 자원(manifest · sw · 꽉 찬 사각형 아이콘), 첫 화면 2열 그리드와 첫 칸 ‘＋ 쿠폰 사진등록’
   · 사진 등록(압축 1600px JPEG · 3장 제한) · 등록·수정 폼 값 · IndexedDB 저장 · 새로고침 유지
+  · 사진을 고르면 열리는 자르기 창 — 비율 칩(자유·1:1·3:4·4:3) · 모서리 드래그 · ↺ 90° 회전 · 자르기 적용/원본 그대로
   · 유효기간 D-day 자동 정렬(임박 → 먼 기한 → 기한 없음 → 기한 지남)과 임박 배지 색
   · 사용 가능 / 사용완료 탭 분리 · 사용완료 이동과 되돌리기
   · 상세 · 흰 배경 고대비 바코드 크게 보기 · 금액권 남은 잔액 수정 · 삭제(확인 창)
@@ -13,7 +14,7 @@
   · JSON 백업 내려받기 / 복원(사진 포함) / 잘못된 파일 안내
   · 390 / 1280 가로 넘침 0 · 모든 input font-size ≥ 16px · touch-action·overscroll 고정
   · 콘솔 오류 0 · 외부 전송 0 · 오프라인 실행
-  · 스크린샷 downloads/coupon_box/01_home_390.png · 02_add_390.png · 03_detail_390.png
+  · 스크린샷 downloads/coupon_box/01_home_390.png · 02_add_390.png · 03_detail_390.png · 04_crop_modal_390.png
 """
 import asyncio
 import base64
@@ -228,6 +229,17 @@ async def open_add(page):
     await page.wait_for_timeout(220)
 
 
+async def pick_photo(page, paths, mode="apply", wait=680):
+    """사진 선택 → 자르기 창 확인 → ‘자르기 적용’ 또는 ‘원본 그대로’"""
+    if isinstance(paths, (str, os.PathLike)):
+        paths = [str(paths)]
+    await page.set_input_files("#photoInput", paths)
+    await page.wait_for_selector("#cropWrap:not([hidden])")
+    await page.wait_for_timeout(280)
+    await page.click("#cropApply" if mode == "apply" else "#cropKeep")
+    await page.wait_for_timeout(wait)
+
+
 async def font_sizes(page):
     return await page.evaluate("""() => [...document.querySelectorAll('input, textarea, select')].map(el => ({
         id: el.id || el.getAttribute('name') || el.type,
@@ -314,9 +326,9 @@ async def run():
         check("manifest 테마 #F2F4F6", manifest.get("theme_color") == "#F2F4F6", str(manifest.get("theme_color")))
         check("manifest 시작 주소", manifest.get("start_url") == "./")
         sw = await page0.evaluate("fetch('./sw.js').then(r => r.text())")
-        check("sw 캐시 이름 coupon-box-v2", "coupon-box-v2" in sw)
+        check("sw 캐시 이름 coupon-box-v3", "coupon-box-v3" in sw)
         html = await page0.evaluate("fetch('./index.html').then(r => r.text())")
-        check("index 버전 쿼리", "styles.css?v=2" in html and "app.js?v=2" in html)
+        check("index 버전 쿼리", "styles.css?v=3" in html and "app.js?v=3" in html)
         for asset in ["icon.svg", "icon-180.png", "icon-192.png", "icon-512.png",
                       "icon-maskable-512.png", "manifest.webmanifest", "app.js", "styles.css"]:
             ok = await page0.evaluate(f"fetch('./{asset}').then(r => r.ok)")
@@ -375,8 +387,7 @@ async def run():
               await page1.inner_text("#toast"))
         check("이름 없으면 시트 유지", await page1.is_visible("#addWrap"))
 
-        await page1.set_input_files("#photoInput", big_photo)
-        await page1.wait_for_selector(".photo-cell")
+        await pick_photo(page1, big_photo, "keep")
         src = await page1.evaluate("() => window.__couponbox.form.photos[0]")
         check("사진은 data URL JPEG", src.startswith("data:image/jpeg;base64,"), src[:32])
         raw = base64.b64decode(src.split(",", 1)[1])
@@ -386,10 +397,9 @@ async def run():
         check("원본보다 작게 저장", len(raw) < os.path.getsize(big_photo) / 3,
               f"{len(raw)} vs {os.path.getsize(big_photo)}")
 
-        await page1.set_input_files("#photoInput", big_photo)
-        await page1.wait_for_timeout(500)
-        await page1.set_input_files("#photoInput", big_photo)
-        await page1.wait_for_timeout(500)
+        await pick_photo(page1, big_photo, "keep")
+        await page1.wait_for_timeout(200)
+        await pick_photo(page1, big_photo, "keep")
         check("사진 3장까지", await page1.locator(".photo-cell").count() == 3,
               str(await page1.locator(".photo-cell").count()))
         await page1.set_input_files("#photoInput", big_photo)
@@ -832,7 +842,128 @@ async def run():
         await ctx8.close()
 
         # ═════════════════════════════════════════════
-        print("\n[10] 390 / 1280 레이아웃 · 입력 글자 크기 · 스크린샷")
+        print("\n[10] 사진 자르기(크롭)")
+        ctx7, page7 = await new_page(browser, width=390, height=844, dsf=2)
+        await goto(page7, port)
+        await open_add(page7)
+        await page7.fill("#fName", "크롭 테스트 쿠폰")
+
+        await page7.set_input_files("#photoInput", [sb_photo])
+        await page7.wait_for_selector("#cropWrap:not([hidden])")
+        await page7.wait_for_timeout(320)
+        check("사진을 고르면 자르기 창이 먼저 열림", await page7.is_visible("#cropWrap"))
+        check("자르기 전에는 담기지 않음", await page7.locator(".photo-cell").count() == 0)
+        check("자르기 창 제목", "사진 자르기" in (await page7.inner_text(".crop-title")), await page7.inner_text(".crop-title"))
+        ratios = await page7.locator("#cropRatios button").all_inner_texts()
+        check("비율 칩 자유·1:1·3:4·4:3", ratios == ["자유", "1:1", "3:4", "4:3"], str(ratios))
+        check("기본 비율은 자유", await page7.get_attribute('#cropRatios button[data-ratio="free"]', "aria-pressed") == "true")
+        check("회전 버튼 있음", "90°" in (await page7.inner_text("#cropRotate")), await page7.inner_text("#cropRotate"))
+        check("원본 그대로 버튼 있음", (await page7.inner_text("#cropKeep")) == "원본 그대로")
+        check("자르기 적용 버튼 있음", (await page7.inner_text("#cropApply")) == "자르기 적용")
+        check("자르기 중 body.modal-open", await page7.evaluate("() => document.body.classList.contains('modal-open')"))
+        check("자르기 무대 touch-action none",
+              await page7.evaluate("() => getComputedStyle(document.getElementById('cropStage')).touchAction") == "none")
+        check("자를 영역 박스 드래그 가능(touch-action none)",
+              await page7.evaluate("() => getComputedStyle(document.getElementById('cropFrame')).touchAction") == "none")
+        overflow = await page7.evaluate("document.documentElement.scrollWidth - window.innerWidth")
+        check("390 자르기 창 가로 넘침 0", overflow <= 1, f"{overflow}px")
+
+        st = await page7.evaluate("() => window.__couponbox.crop")
+        check("자르기 소스 = 원본 크기", (st["source"]["w"], st["source"]["h"]) == (1400, 1050), str(st["source"]))
+        check("처음엔 사진 전체가 자를 영역", st["rect"]["w"] >= 300 and st["rect"]["h"] >= 200, str(st["rect"]))
+        check("모서리 핸들 4개", await page7.locator(".crop-handle").count() == 4)
+
+        await page7.screenshot(path=os.path.join(SHOTS, "04_crop_modal_390.png"))
+        check("04_crop_modal_390.png", os.path.getsize(os.path.join(SHOTS, "04_crop_modal_390.png")) > 20000)
+
+        # 3:4 세로로 잘라 담기
+        await page7.click('#cropRatios button[data-ratio="3:4"]')
+        await page7.wait_for_timeout(240)
+        st = await page7.evaluate("() => window.__couponbox.crop")
+        check("3:4 비율 선택 표시", await page7.get_attribute('#cropRatios button[data-ratio="3:4"]', "aria-pressed") == "true")
+        check("3:4 자를 영역 비율", abs(st["rect"]["w"] / st["rect"]["h"] - 0.75) < 0.02,
+              f"{st['rect']}")
+        want_w = round(st["rect"]["w"] * st["scale"])
+        want_h = round(st["rect"]["h"] * st["scale"])
+        check("자를 영역 크기 안내", f"{want_w} × {want_h}" in (await page7.inner_text("#cropSize")), await page7.inner_text("#cropSize"))
+        await page7.click("#cropApply")
+        await page7.wait_for_timeout(750)
+        check("자르기 적용하면 담김", await page7.locator(".photo-cell").count() == 1,
+              str(await page7.locator(".photo-cell").count()))
+        check("적용 뒤 자르기 창 닫힘", await page7.is_hidden("#cropWrap"))
+        saved = await page7.evaluate("() => window.__couponbox.form.photos[0]")
+        check("자른 사진은 data URL JPEG", saved.startswith("data:image/jpeg;base64,"), saved[:32])
+        raw = base64.b64decode(saved.split(",", 1)[1])
+        with Image.open(io.BytesIO(raw)) as im:
+            check("자른 사진은 3:4 세로", abs(im.size[0] / im.size[1] - 0.75) < 0.02, str(im.size))
+            check("자른 사진 = 고른 영역 크기", abs(im.size[0] - want_w) <= 2 and abs(im.size[1] - want_h) <= 2,
+                  f"{im.size} vs ({want_w}, {want_h})")
+            check("자른 사진도 1600px 이하", max(im.size) <= 1600, str(im.size))
+        check("자른 사진이 원본보다 작음", len(raw) < os.path.getsize(sb_photo), f"{len(raw)} vs {os.path.getsize(sb_photo)}")
+
+        # 회전 · 모서리 드래그 · 자유 비율
+        await page7.click('.photo-del[data-remove="0"]')
+        await page7.wait_for_timeout(200)
+        await page7.set_input_files("#photoInput", [big_photo])
+        await page7.wait_for_selector("#cropWrap:not([hidden])")
+        await page7.wait_for_timeout(340)
+        before = await page7.evaluate("() => window.__couponbox.crop.source")
+        await page7.click("#cropRotate")
+        await page7.wait_for_timeout(320)
+        after = await page7.evaluate("() => window.__couponbox.crop.source")
+        check("↺ 90° 회전하면 가로·세로가 바뀜", (after["w"], after["h"]) == (before["h"], before["w"]),
+              f"{before} → {after}")
+        overflow = await page7.evaluate("document.documentElement.scrollWidth - window.innerWidth")
+        check("회전 뒤에도 가로 넘침 0", overflow <= 1, f"{overflow}px")
+
+        r1 = await page7.evaluate("() => window.__couponbox.crop.rect")
+        hb = await page7.locator("#cropFrame .crop-handle.br").bounding_box()
+        await page7.mouse.move(hb["x"] + hb["width"] / 2, hb["y"] + hb["height"] / 2)
+        await page7.mouse.down()
+        await page7.mouse.move(hb["x"] + hb["width"] / 2 - 80, hb["y"] + hb["height"] / 2 - 80, steps=10)
+        await page7.mouse.up()
+        await page7.wait_for_timeout(260)
+        r2 = await page7.evaluate("() => window.__couponbox.crop.rect")
+        check("모서리를 끌면 자를 영역이 줄어듦", r2["w"] < r1["w"] - 20 and r2["h"] < r1["h"] - 20, f"{r1} → {r2}")
+        check("모서리 드래그 뒤에도 사진 안쪽",
+              r2["x"] >= -1 and r2["y"] >= -1 and r2["x"] + r2["w"] <= r1["w"] + 1, str(r2))
+        await page7.click("#cropApply")
+        await page7.wait_for_timeout(750)
+        crop2 = await page7.evaluate("() => window.__couponbox.form.photos[0]")
+        with Image.open(io.BytesIO(base64.b64decode(crop2.split(",", 1)[1]))) as im:
+            check("회전한 사진은 세로가 김", im.size[1] > im.size[0], str(im.size))
+            want = r2["w"] / r2["h"]
+            check("자른 사진 비율 = 고른 영역 비율", abs(im.size[0] / im.size[1] - want) < 0.02,
+                  f"{im.size} vs {want:.3f}")
+            check("회전·자른 사진도 1600px 이하", max(im.size) <= 1600, str(im.size))
+
+        # 원본 그대로 · 취소
+        await page7.click('.photo-del[data-remove="0"]')
+        await page7.wait_for_timeout(200)
+        await pick_photo(page7, sb_photo, "keep")
+        check("원본 그대로 담기", await page7.locator(".photo-cell").count() == 1)
+        keep = await page7.evaluate("() => window.__couponbox.form.photos[0]")
+        with Image.open(io.BytesIO(base64.b64decode(keep.split(",", 1)[1]))) as im:
+            check("원본 그대로는 자르지 않음", im.size == (1400, 1050), str(im.size))
+        await page7.set_input_files("#photoInput", [big_photo])
+        await page7.wait_for_selector("#cropWrap:not([hidden])")
+        await page7.wait_for_timeout(280)
+        await page7.click("#cropCancel")
+        await page7.wait_for_timeout(420)
+        check("취소하면 자르기 창 닫힘", await page7.is_hidden("#cropWrap"))
+        check("취소하면 사진도 안 담힘", await page7.locator(".photo-cell").count() == 1)
+
+        await page7.fill("#fBrand", "스타벅스")
+        await page7.click("#addSave")
+        await page7.wait_for_timeout(700)
+        check("자른 사진으로 쿠폰 저장", await page7.locator(".coupon").count() == 1, str(await page7.locator(".coupon").count()))
+        stored_crop = await page7.evaluate("() => window.__couponbox.items[0].photos[0]")
+        with Image.open(io.BytesIO(base64.b64decode(stored_crop.split(",", 1)[1]))) as im:
+            check("저장된 사진이 원본 그대로", im.size == (1400, 1050), str(im.size))
+        await ctx7.close()
+
+        # ═════════════════════════════════════════════
+        print("\n[11] 390 / 1280 레이아웃 · 입력 글자 크기 · 스크린샷")
         ctxA, pageA = await new_page(browser, width=390, height=844, dsf=2)
         await goto(pageA, port)
         await seed(pageA, SEED)
@@ -857,8 +988,7 @@ async def run():
         check("01_home_390.png", os.path.getsize(os.path.join(SHOTS, "01_home_390.png")) > 30000)
 
         await open_add(pageA)
-        await pageA.set_input_files("#photoInput", big_photo)
-        await pageA.wait_for_selector(".photo-cell")
+        await pick_photo(pageA, big_photo, "keep")
         await pageA.wait_for_timeout(300)
         await pageA.fill("#fName", "뿌링클 순살 + 콜라 1.25L")
         await pageA.fill("#fBrand", "BHC")
@@ -927,7 +1057,7 @@ async def run():
         await ctxB.close()
 
         # ═════════════════════════════════════════════
-        print("\n[11] 오프라인 실행")
+        print("\n[12] 오프라인 실행")
         ctxC, pageC = await new_page(browser)
         await goto(pageC, port)
         await seed(pageC, SEED)
@@ -957,7 +1087,7 @@ async def run():
     srv.shutdown()
 
     # ═════════════════════════════════════════════
-    print("\n[12] 외부 전송 · 콘솔 오류")
+    print("\n[13] 외부 전송 · 콘솔 오류")
     check("외부 서버로 보내는 요청 0", len(EXTERNAL) == 0, " | ".join(EXTERNAL[:3]))
     real_errors = [e for e in ERRORS if "favicon" not in e.lower()
                    and "ERR_INTERNET_DISCONNECTED" not in e]
