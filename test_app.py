@@ -112,6 +112,41 @@ def make_coupon(path, brand, title, sub, color="#0F6E3F", size=(1400, 1050), noi
     return path
 
 
+CARD_BOX = (220, 180, 1180, 1020)   # 자동 맞춤 확인용: 어두운 배경 위 밝은 쿠폰 카드 위치
+
+
+def make_card_on_dark(path, W=1400, H=1200, box=CARD_BOX):
+    """어두운 책상 위에 놓인 밝은 기프티콘 화면 — 자동 맞춤(영역 감지) 확인용."""
+    img = Image.new("RGB", (W, H), "#22262B")
+    px = img.load()
+    for y in range(0, H, 2):
+        for x in range(0, W, 2):
+            v = 30 + ((x * 5 + y * 11) % 9)
+            px[x, y] = (v, v + 2, v + 6)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle(box, radius=28, fill="#FFFFFF")
+    d.rectangle([box[0], box[1], box[2], box[1] + 140], fill="#0F6E3F")
+    d.text((box[0] + 40, box[1] + 40), "STARBUCKS", fill="#FFFFFF", font=font(52))
+    d.text((box[0] + 60, box[1] + 210), "아메리카노 Tall 1잔", fill="#191F28", font=font(44))
+    d.text((box[0] + 60, box[1] + 290), "유효기간 2026.12.31까지", fill="#6B7684", font=font(30))
+    bx = box[0] + 90
+    i = 0
+    while bx < box[2] - 120:
+        bw = 6 + (i * 7) % 13
+        d.rectangle([bx, box[1] + 380, bx + bw, box[1] + 600], fill="#111418")
+        bx += bw + 8
+        i += 1
+    d.text((box[0] + 60, box[1] + 640), "8801 2345 6789 0", fill="#4E5968", font=font(30))
+    img.save(path, "JPEG", quality=88)
+    return path
+
+
+def make_uniform(path, W=1200, H=900, color="#6E6E6E"):
+    """전체가 고른 색 — 자동 맞춤이 포기하고 전체로 폴백하는지 확인용."""
+    Image.new("RGB", (W, H), color).save(path, "JPEG", quality=88)
+    return path
+
+
 def data_url_of(path):
     with open(path, "rb") as fh:
         return "data:image/jpeg;base64," + base64.b64encode(fh.read()).decode()
@@ -258,6 +293,8 @@ async def run():
     os.makedirs(FIX, exist_ok=True)
     sb_photo = make_coupon(os.path.join(FIX, "starbucks.png"), "STARBUCKS", "아메리카노 Tall 1잔", "유효기간 2026.12.31까지", "#0F6E3F")
     big_photo = make_coupon(os.path.join(FIX, "big.png"), "BHC", "뿌링클 + 콜라", "큰 사진 압축 확인용", "#B4212C", size=(2400, 1800))
+    auto_dark = make_card_on_dark(os.path.join(FIX, "auto_dark.jpg"))
+    auto_flat = make_uniform(os.path.join(FIX, "auto_flat.jpg"))
     starbucks_url = data_url_of(sb_photo)
     SEED = build_seed(starbucks_url)
 
@@ -326,9 +363,9 @@ async def run():
         check("manifest 테마 #F2F4F6", manifest.get("theme_color") == "#F2F4F6", str(manifest.get("theme_color")))
         check("manifest 시작 주소", manifest.get("start_url") == "./")
         sw = await page0.evaluate("fetch('./sw.js').then(r => r.text())")
-        check("sw 캐시 이름 coupon-box-v3", "coupon-box-v3" in sw)
+        check("sw 캐시 이름 coupon-box-v4", "coupon-box-v4" in sw)
         html = await page0.evaluate("fetch('./index.html').then(r => r.text())")
-        check("index 버전 쿼리", "styles.css?v=3" in html and "app.js?v=3" in html)
+        check("index 버전 쿼리", "styles.css?v=4" in html and "app.js?v=4" in html)
         for asset in ["icon.svg", "icon-180.png", "icon-192.png", "icon-512.png",
                       "icon-maskable-512.png", "manifest.webmanifest", "app.js", "styles.css"]:
             ok = await page0.evaluate(f"fetch('./{asset}').then(r => r.ok)")
@@ -873,8 +910,6 @@ async def run():
         check("처음엔 사진 전체가 자를 영역", st["rect"]["w"] >= 300 and st["rect"]["h"] >= 200, str(st["rect"]))
         check("모서리 핸들 4개", await page7.locator(".crop-handle").count() == 4)
 
-        await page7.screenshot(path=os.path.join(SHOTS, "04_crop_modal_390.png"))
-        check("04_crop_modal_390.png", os.path.getsize(os.path.join(SHOTS, "04_crop_modal_390.png")) > 20000)
 
         # 3:4 세로로 잘라 담기
         await page7.click('#cropRatios button[data-ratio="3:4"]')
@@ -925,8 +960,11 @@ async def run():
         await page7.wait_for_timeout(260)
         r2 = await page7.evaluate("() => window.__couponbox.crop.rect")
         check("모서리를 끌면 자를 영역이 줄어듦", r2["w"] < r1["w"] - 20 and r2["h"] < r1["h"] - 20, f"{r1} → {r2}")
+        view = await page7.locator("#cropView").bounding_box()
         check("모서리 드래그 뒤에도 사진 안쪽",
-              r2["x"] >= -1 and r2["y"] >= -1 and r2["x"] + r2["w"] <= r1["w"] + 1, str(r2))
+              r2["x"] >= -1 and r2["y"] >= -1
+              and r2["x"] + r2["w"] <= view["width"] + 1
+              and r2["y"] + r2["h"] <= view["height"] + 1, str(r2))
         await page7.click("#cropApply")
         await page7.wait_for_timeout(750)
         crop2 = await page7.evaluate("() => window.__couponbox.form.photos[0]")
@@ -960,6 +998,70 @@ async def run():
         stored_crop = await page7.evaluate("() => window.__couponbox.items[0].photos[0]")
         with Image.open(io.BytesIO(base64.b64decode(stored_crop.split(",", 1)[1]))) as im:
             check("저장된 사진이 원본 그대로", im.size == (1400, 1050), str(im.size))
+
+        # ✨ 자동 맞춤 — 어두운 배경 위 밝은 쿠폰 카드
+        await open_add(page7)
+        await page7.set_input_files("#photoInput", [auto_dark])
+        await page7.wait_for_selector("#cropWrap:not([hidden])")
+        await page7.wait_for_timeout(420)
+        check("✨ 자동 맞춤 버튼 있음", "자동 맞춤" in (await page7.inner_text("#cropAuto")),
+              await page7.inner_text("#cropAuto"))
+        st = await page7.evaluate("() => window.__couponbox.crop")
+        det = st["detected"]
+        check("자동 맞춤: 어두운 배경에서 밝은 카드를 찾음", det is not None, str(det))
+        r0 = st["rect"]
+        sc = st["scale"]
+        bx0, by0 = r0["x"] * sc, r0["y"] * sc
+        bx1, by1 = (r0["x"] + r0["w"]) * sc, (r0["y"] + r0["h"]) * sc
+        check("자동 맞춤: 카드 위치·크기와 맞음",
+              abs(bx0 - CARD_BOX[0]) <= 40 and abs(by0 - CARD_BOX[1]) <= 40
+              and abs(bx1 - CARD_BOX[2]) <= 40 and abs(by1 - CARD_BOX[3]) <= 40,
+              f"({bx0:.0f},{by0:.0f})-({bx1:.0f},{by1:.0f}) vs {CARD_BOX}")
+        check("자동 맞춤: 사진 전체보다 작게 잡음", r0["w"] * sc < 1400 * 0.95, str(r0))
+        await page7.wait_for_timeout(2600)  # 앞선 토스트가 사라진 뒤 찍는다
+        await page7.screenshot(path=os.path.join(SHOTS, "04_crop_modal_390.png"))
+        check("04_crop_modal_390.png", os.path.getsize(os.path.join(SHOTS, "04_crop_modal_390.png")) > 20000)
+
+        hb = await page7.locator("#cropFrame .crop-handle.br").bounding_box()
+        await page7.mouse.move(hb["x"] + hb["width"] / 2, hb["y"] + hb["height"] / 2)
+        await page7.mouse.down()
+        await page7.mouse.move(hb["x"] + hb["width"] / 2 - 90, hb["y"] + hb["height"] / 2 - 90, steps=10)
+        await page7.mouse.up()
+        await page7.wait_for_timeout(240)
+        r_manual = await page7.evaluate("() => window.__couponbox.crop.rect")
+        check("손으로 줄인 뒤", r_manual["w"] < r0["w"] - 20, str(r_manual))
+        await page7.click("#cropAuto")
+        await page7.wait_for_timeout(320)
+        r_auto = await page7.evaluate("() => window.__couponbox.crop.rect")
+        check("✨ 자동 맞춤을 다시 누르면 감지 영역으로 돌아옴",
+              abs(r_auto["w"] - r0["w"]) <= 1.5 and abs(r_auto["h"] - r0["h"]) <= 1.5
+              and abs(r_auto["x"] - r0["x"]) <= 1.5, f"{r_manual} → {r_auto}")
+
+        await page7.click("#cropRotate")
+        await page7.wait_for_timeout(420)
+        st_rot = await page7.evaluate("() => window.__couponbox.crop")
+        check("회전 뒤 자동 맞춤이 다시 감지", st_rot["detected"] is not None, str(st_rot["detected"]))
+        await page7.click("#cropCancel")
+        await page7.wait_for_timeout(300)
+
+        await page7.set_input_files("#photoInput", [auto_flat])
+        await page7.wait_for_selector("#cropWrap:not([hidden])")
+        await page7.wait_for_timeout(400)
+        st_flat = await page7.evaluate("() => window.__couponbox.crop")
+        check("균일한 사진은 감지하지 않음", st_flat["detected"] is None, str(st_flat["detected"]))
+        view = await page7.locator("#cropView").bounding_box()
+        rf = st_flat["rect"]
+        check("감지 실패하면 사진 전체로 폴백",
+              abs(rf["w"] - view["width"]) <= 1.5 and abs(rf["h"] - view["height"]) <= 1.5, str(rf))
+        await page7.click("#cropAuto")
+        await page7.wait_for_timeout(300)
+        check("못 찾으면 안내 문구", "찾지 못해" in (await page7.inner_text("#toast")),
+              await page7.inner_text("#toast"))
+        check("폴백 상태에서도 모서리 조절 가능", await page7.locator(".crop-handle").count() == 4)
+        await page7.click("#cropCancel")
+        await page7.wait_for_timeout(250)
+        await page7.click("#addClose")
+        await page7.wait_for_timeout(250)
         await ctx7.close()
 
         # ═════════════════════════════════════════════
